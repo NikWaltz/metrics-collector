@@ -2,15 +2,16 @@ package service
 
 import (
 	"errors"
-	"github.com/NikWaltz/metrics-collector/internal/storage"
-	"github.com/NikWaltz/metrics-collector/model"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/NikWaltz/metrics-collector/model"
 )
 
 func TestUpdate(t *testing.T) {
 	type fields struct {
-		storage Storage
+		storage model.Storage
 	}
 	type args struct {
 		metricType  string
@@ -25,7 +26,7 @@ func TestUpdate(t *testing.T) {
 	}{
 		{
 			name:   "Update gauge metric",
-			fields: fields{storage: storage.New()},
+			fields: fields{storage: *model.NewStorage()},
 			args: args{
 				metricType:  "gauge",
 				metricName:  "TotalMemory",
@@ -35,7 +36,7 @@ func TestUpdate(t *testing.T) {
 		},
 		{
 			name:   "Update gauge metric with complex value",
-			fields: fields{storage: storage.New()},
+			fields: fields{storage: *model.NewStorage()},
 			args: args{
 				metricType:  "gauge",
 				metricName:  "TotalMemory",
@@ -45,7 +46,7 @@ func TestUpdate(t *testing.T) {
 		},
 		{
 			name:   "Update counter metric",
-			fields: fields{storage: storage.New()},
+			fields: fields{storage: *model.NewStorage()},
 			args: args{
 				metricType:  "counter",
 				metricName:  "PollCounter",
@@ -55,7 +56,7 @@ func TestUpdate(t *testing.T) {
 		},
 		{
 			name:   "Update counter metric with float value",
-			fields: fields{storage: storage.New()},
+			fields: fields{storage: *model.NewStorage()},
 			args: args{
 				metricType:  "counter",
 				metricName:  "PollCounter",
@@ -65,7 +66,7 @@ func TestUpdate(t *testing.T) {
 		},
 		{
 			name:   "Update non-existence metric",
-			fields: fields{storage: storage.New()},
+			fields: fields{storage: *model.NewStorage()},
 			args: args{
 				metricType:  "histogram",
 				metricName:  "Total",
@@ -88,38 +89,9 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
-func TestGetAll(t *testing.T) {
-	st := &storage.Storage{
-		Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
-		Counters: map[string]model.Counter{"Counter": 5},
-	}
-	type fields struct {
-		storage Storage
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   storage.Storage
-	}{
-		{
-			name:   "Get storage",
-			fields: fields{storage: st},
-			want:   *st,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &service{
-				storage: tt.fields.storage,
-			}
-			assert.Equalf(t, tt.want, s.GetAll(), "GetAll()")
-		})
-	}
-}
-
 func TestGetCounter(t *testing.T) {
 	type fields struct {
-		storage Storage
+		storage model.Storage
 	}
 	type args struct {
 		name string
@@ -133,7 +105,7 @@ func TestGetCounter(t *testing.T) {
 	}{
 		{
 			name: "Get exist counter",
-			fields: fields{storage: &storage.Storage{
+			fields: fields{storage: model.Storage{
 				Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
 				Counters: map[string]model.Counter{"PollCounter": 5},
 			}},
@@ -143,7 +115,7 @@ func TestGetCounter(t *testing.T) {
 		},
 		{
 			name: "Get non-existence counter",
-			fields: fields{storage: &storage.Storage{
+			fields: fields{storage: model.Storage{
 				Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
 				Counters: map[string]model.Counter{"PollCounter": 5},
 			}},
@@ -170,7 +142,7 @@ func TestGetCounter(t *testing.T) {
 
 func TestGetGauge(t *testing.T) {
 	type fields struct {
-		storage Storage
+		storage model.Storage
 	}
 	type args struct {
 		name string
@@ -184,7 +156,7 @@ func TestGetGauge(t *testing.T) {
 	}{
 		{
 			name: "Get exist gauge",
-			fields: fields{storage: &storage.Storage{
+			fields: fields{storage: model.Storage{
 				Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
 				Counters: map[string]model.Counter{"PollCounter": 5},
 			}},
@@ -194,7 +166,7 @@ func TestGetGauge(t *testing.T) {
 		},
 		{
 			name: "Get non-existence gauge",
-			fields: fields{storage: &storage.Storage{
+			fields: fields{storage: model.Storage{
 				Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
 				Counters: map[string]model.Counter{"PollCounter": 5},
 			}},

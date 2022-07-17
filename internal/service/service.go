@@ -2,26 +2,18 @@ package service
 
 import (
 	"errors"
-	"github.com/NikWaltz/metrics-collector/internal/storage"
-	"github.com/NikWaltz/metrics-collector/model"
 	"strconv"
 	"strings"
+
+	"github.com/NikWaltz/metrics-collector/model"
 )
 
-type Storage interface {
-	SaveGauge(string, model.Gauge)
-	SaveCounter(string, model.Counter)
-	GetGauge(string) (model.Gauge, bool)
-	GetCounter(string) (model.Counter, bool)
-	GetAll() storage.Storage
-}
-
 type service struct {
-	storage Storage
+	storage model.Storage
 }
 
-func New(storage Storage) *service {
-	return &service{storage: storage}
+func New(storage *model.Storage) *service {
+	return &service{storage: *storage}
 }
 
 type TypeError struct {
@@ -48,8 +40,8 @@ func (s *service) GetCounter(name string) (model.Counter, error) {
 	}
 }
 
-func (s *service) GetAll() storage.Storage {
-	return s.storage.GetAll()
+func (s *service) GetStorage() model.Storage {
+	return s.storage
 }
 
 func (s *service) Update(metricType string, metricName string, metricValue string) error {

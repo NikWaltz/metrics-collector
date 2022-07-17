@@ -3,18 +3,19 @@ package api
 import (
 	"errors"
 	"fmt"
-	"github.com/NikWaltz/metrics-collector/internal/storage"
-	"github.com/NikWaltz/metrics-collector/model"
-	"github.com/go-chi/chi/v5"
-	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/NikWaltz/metrics-collector/model"
 )
 
 type mockCollector struct {
 	err error
-	st  storage.Storage
+	st  model.Storage
 }
 
 func (c mockCollector) Update(name string, typ string, value string) error {
@@ -27,7 +28,7 @@ func (c mockCollector) GetGauge(name string) (model.Gauge, error) {
 func (c mockCollector) GetCounter(name string) (model.Counter, error) {
 	return c.st.Counters[name], c.err
 }
-func (c mockCollector) GetAll() storage.Storage {
+func (c mockCollector) GetStorage() model.Storage {
 	return c.st
 }
 
@@ -59,8 +60,8 @@ func Test_updateHandle(t *testing.T) {
 	}
 }
 
-func Test_valueHandle(t *testing.T) {
-	stor := storage.Storage{
+func Test_getValueHandle(t *testing.T) {
+	stor := model.Storage{
 		Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
 		Counters: map[string]model.Counter{"PollCounter": 5},
 	}
@@ -139,7 +140,7 @@ func Test_valueHandle(t *testing.T) {
 				r:       tt.fields.r,
 				service: tt.fields.service,
 			}
-			a.r.Get("/value/{type}/{name}", a.valueHandle)
+			a.r.Get("/value/{type}/{name}", a.getValueHandle)
 
 			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("/value/%s/%s", tt.metricType, tt.metricName), nil)
 			if err != nil {
@@ -154,8 +155,8 @@ func Test_valueHandle(t *testing.T) {
 	}
 }
 
-func Test_handle(t *testing.T) {
-	stor := storage.Storage{
+func Test_getMetricsHandle(t *testing.T) {
+	stor := model.Storage{
 		Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
 		Counters: map[string]model.Counter{"PollCounter": 5},
 	}
@@ -190,7 +191,7 @@ func Test_handle(t *testing.T) {
 				r:       tt.fields.r,
 				service: tt.fields.service,
 			}
-			a.r.Get("/", a.handle)
+			a.r.Get("/", a.getMetricsHandle)
 
 			req, err := http.NewRequest(http.MethodGet, "/", nil)
 			if err != nil {
