@@ -3,7 +3,7 @@ package model
 type Gauge float64
 type Counter int64
 
-type Metrics struct {
+type MetricsList struct {
 	Alloc         Gauge
 	BuckHashSys   Gauge
 	Frees         Gauge
@@ -33,4 +33,11 @@ type Metrics struct {
 	TotalAlloc    Gauge
 	RandomValue   Gauge
 	PollCount     Counter
+}
+
+type Metrics struct {
+	ID    string   `json:"id"`
+	MType string   `json:"type"`
+	Delta *int64   `json:"delta,omitempty"`
+	Value *float64 `json:"value,omitempty"`
 }
