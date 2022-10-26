@@ -46,14 +46,14 @@ func (s *service) GetStorage() model.Storage {
 
 func (s *service) Update(metricType string, metricName string, metricValue string) error {
 	switch strings.ToLower(metricType) {
-	case "gauge":
+	case model.GaugeType:
 		value, err := strconv.ParseFloat(metricValue, 64)
 		if err != nil {
 			return err
 		}
 		s.storage.SaveGauge(metricName, model.Gauge(value))
 		return nil
-	case "counter":
+	case model.CounterType:
 		value, err := strconv.ParseInt(metricValue, 10, 64)
 		if err != nil {
 			return err

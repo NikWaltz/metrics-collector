@@ -3,6 +3,7 @@ package api
 import (
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -51,7 +52,8 @@ func (a *api) updateHandle(w http.ResponseWriter, r *http.Request) {
 	metricValue := chi.URLParam(r, "value")
 	err := a.service.Update(metricType, metricName, metricValue)
 	if err != nil {
-		if _, ok := err.(*service.TypeError); ok {
+		var typeError *service.TypeError
+		if errors.As(err, &typeError) {
 			w.WriteHeader(http.StatusNotImplemented)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
@@ -69,7 +71,7 @@ func (a *api) getValueHandle(w http.ResponseWriter, r *http.Request) {
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
 	switch strings.ToLower(metricType) {
-	case "gauge":
+	case model.GaugeType:
 		if value, err := a.service.GetGauge(metricName); err == nil {
 			w.WriteHeader(http.StatusOK)
 			_, errWr := w.Write([]byte(fmt.Sprintf("%v", value)))
@@ -79,7 +81,7 @@ func (a *api) getValueHandle(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
-	case "counter":
+	case model.CounterType:
 		if value, err := a.service.GetCounter(metricName); err == nil {
 			w.WriteHeader(http.StatusOK)
 			_, errWr := w.Write([]byte(fmt.Sprintf("%d", value)))
@@ -97,13 +99,11 @@ func (a *api) getValueHandle(w http.ResponseWriter, r *http.Request) {
 func (a *api) jsonUpdateHandle(w http.ResponseWriter, r *http.Request) {
 	var metric model.Metrics
 
-	if r.Header.Get("Content-Type") != "" {
-		value, _ := header.ParseValueAndParams(r.Header, "Content-Type")
-		if value != "application/json" {
-			msg := "Content-Type header is not application/json"
-			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
-		}
+	contentType, _ := header.ParseValueAndParams(r.Header, "Content-Type")
+	if contentType != "application/json" {
+		msg := "Content-Type header is not application/json"
+		http.Error(w, msg, http.StatusUnsupportedMediaType)
+		return
 	}
 
 	decodeErr := json.NewDecoder(r.Body).Decode(&metric)
@@ -114,17 +114,19 @@ func (a *api) jsonUpdateHandle(w http.ResponseWriter, r *http.Request) {
 
 	var value string
 	switch strings.ToLower(metric.MType) {
-	case "gauge":
+	case model.GaugeType:
 		value = strconv.FormatFloat(*metric.Value, 'f', -1, 64)
-	case "counter":
+	case model.CounterType:
 		value = strconv.FormatInt(*metric.Delta, 10)
 	default:
 		w.WriteHeader(http.StatusNotImplemented)
 		return
 	}
 	err := a.service.Update(metric.MType, metric.ID, value)
+
 	if err != nil {
-		if _, ok := err.(*service.TypeError); ok {
+		var typeError *service.TypeError
+		if errors.As(err, &typeError) {
 			w.WriteHeader(http.StatusNotImplemented)
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
@@ -141,13 +143,11 @@ func (a *api) jsonUpdateHandle(w http.ResponseWriter, r *http.Request) {
 func (a *api) getJSONValueHandle(w http.ResponseWriter, r *http.Request) {
 	var metric model.Metrics
 
-	if r.Header.Get("Content-Type") != "" {
-		value, _ := header.ParseValueAndParams(r.Header, "Content-Type")
-		if value != "application/json" {
-			msg := "Content-Type header is not application/json"
-			http.Error(w, msg, http.StatusUnsupportedMediaType)
-			return
-		}
+	contentType, _ := header.ParseValueAndParams(r.Header, "Content-Type")
+	if contentType != "application/json" {
+		msg := "Content-Type header is not application/json"
+		http.Error(w, msg, http.StatusUnsupportedMediaType)
+		return
 	}
 
 	decodeErr := json.NewDecoder(r.Body).Decode(&metric)
@@ -157,7 +157,7 @@ func (a *api) getJSONValueHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch strings.ToLower(metric.MType) {
-	case "gauge":
+	case model.GaugeType:
 		if value, err := a.service.GetGauge(metric.ID); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -169,7 +169,7 @@ func (a *api) getJSONValueHandle(w http.ResponseWriter, r *http.Request) {
 		} else {
 			w.WriteHeader(http.StatusNotFound)
 		}
-	case "counter":
+	case model.CounterType:
 		if value, err := a.service.GetCounter(metric.ID); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -203,7 +203,7 @@ func (a *api) getMetricsHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func gzipHandle(next http.Handler) http.Handler {
+func gzipCompressHandle(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			next.ServeHTTP(w, r)
@@ -212,6 +212,7 @@ func gzipHandle(next http.Handler) http.Handler {
 
 		gz, err := gzip.NewWriterLevel(w, gzip.BestSpeed)
 		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
 			_, err := io.WriteString(w, err.Error())
 			if err != nil {
 				return
@@ -225,8 +226,31 @@ func gzipHandle(next http.Handler) http.Handler {
 	})
 }
 
+func gzipDecompressHandle(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		gz, err := gzip.NewReader(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, err := io.WriteString(w, err.Error())
+			if err != nil {
+				return
+			}
+			return
+		}
+		defer gz.Close()
+		r.Body = gz
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (a *api) Run(addr string) error {
-	a.r.Use(gzipHandle)
+	a.r.Use(gzipCompressHandle)
+	a.r.Use(gzipDecompressHandle)
 	a.r.Post("/update/{type}/{name}/{value}", a.updateHandle)
 	a.r.Get("/value/{type}/{name}", a.getValueHandle)
 	a.r.Post("/update/", a.jsonUpdateHandle)

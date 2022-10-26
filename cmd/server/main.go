@@ -22,7 +22,7 @@ type Config struct {
 var cfg Config
 
 func init() {
-	defaultDuration, _ := time.ParseDuration("300s")
+	const defaultDuration = time.Second * 300
 	flag.StringVar(&cfg.Address, "a", "127.0.0.1:8080", "Server address")
 	flag.DurationVar(&cfg.StoreInterval, "i", defaultDuration, "Store to file interval")
 	flag.StringVar(&cfg.StoreFile, "f", "/tmp/devops-metrics-db.json", "Store file path")
@@ -43,5 +43,8 @@ func main() {
 	myAPI := api.New(myService)
 
 	go myFileService.Run()
-	log.Fatalln(myAPI.Run(cfg.Address))
+	err := myAPI.Run(cfg.Address)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }

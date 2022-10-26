@@ -27,8 +27,8 @@ type Config struct {
 var cfg Config
 
 func init() {
-	defaultPollInterval, _ := time.ParseDuration("2s")
-	defaultReportInterval, _ := time.ParseDuration("10s")
+	const defaultPollInterval = time.Second * 2
+	const defaultReportInterval = time.Second * 10
 	flag.StringVar(&cfg.Address, "a", "127.0.0.1:8080", "Server address for sending metrics")
 	flag.DurationVar(&cfg.PollInterval, "p", defaultPollInterval, "Poll metrics interval")
 	flag.DurationVar(&cfg.ReportInterval, "r", defaultReportInterval, "Sending report interval")
@@ -107,8 +107,9 @@ func sendMetricsTask(cfg *Config, ch chan model.MetricsList) {
 
 func sendMetric(endpoint string, metrics *model.Metrics) *http.Response {
 	body := new(bytes.Buffer)
-	err := json.NewEncoder(body).Encode(*metrics)
+	err := json.NewEncoder(body).Encode(metrics)
 	if err != nil {
+		log.Println(err)
 		return nil
 	}
 	log.Println(body)

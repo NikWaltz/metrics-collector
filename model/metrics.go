@@ -3,6 +3,9 @@ package model
 type Gauge float64
 type Counter int64
 
+const GaugeType = "gauge"
+const CounterType = "counter"
+
 type MetricsList struct {
 	Alloc         Gauge
 	BuckHashSys   Gauge

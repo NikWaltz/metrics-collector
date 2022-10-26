@@ -28,7 +28,7 @@ func TestUpdate(t *testing.T) {
 			name:   "Update gauge metric",
 			fields: fields{storage: *model.NewStorage()},
 			args: args{
-				metricType:  "gauge",
+				metricType:  model.GaugeType,
 				metricName:  "TotalMemory",
 				metricValue: "65.34",
 			},
@@ -38,7 +38,7 @@ func TestUpdate(t *testing.T) {
 			name:   "Update gauge metric with complex value",
 			fields: fields{storage: *model.NewStorage()},
 			args: args{
-				metricType:  "gauge",
+				metricType:  model.GaugeType,
 				metricName:  "TotalMemory",
 				metricValue: "65 + 23i",
 			},
@@ -48,7 +48,7 @@ func TestUpdate(t *testing.T) {
 			name:   "Update counter metric",
 			fields: fields{storage: *model.NewStorage()},
 			args: args{
-				metricType:  "counter",
+				metricType:  model.CounterType,
 				metricName:  "PollCounter",
 				metricValue: "62",
 			},
