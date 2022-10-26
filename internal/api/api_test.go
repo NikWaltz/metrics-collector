@@ -148,6 +148,7 @@ func Test_getValueHandle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 			a.r.ServeHTTP(rr, req)
 
@@ -232,6 +233,7 @@ func Test_jsonUpdateHandle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 			a.r.ServeHTTP(rr, req)
 
@@ -339,6 +341,7 @@ func Test_getJsonValueHandle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 			a.r.ServeHTTP(rr, req)
 
