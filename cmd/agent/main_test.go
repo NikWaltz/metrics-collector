@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/NikWaltz/metrics-collector/model"
 	"io"
 	"log"
 	"net/http"
@@ -11,8 +12,10 @@ import (
 )
 
 func Test_sendMetric(t *testing.T) {
+	value := 54.23
 	type args struct {
 		endpoint   string
+		metrics    model.Metrics
 		wantStatus int
 	}
 	tests := []struct {
@@ -22,14 +25,26 @@ func Test_sendMetric(t *testing.T) {
 		{
 			name: "Send gauge metric",
 			args: args{
-				endpoint:   "/update/gauge/Alloc/54.23",
+				endpoint: "/update/",
+				metrics: model.Metrics{
+					ID:    "Alloc",
+					MType: "Gauge",
+					Delta: nil,
+					Value: &value,
+				},
 				wantStatus: 200,
 			},
 		},
 		{
 			name: "Send bad counter metric",
 			args: args{
-				endpoint:   "/update/counter/BadCount/54.23",
+				endpoint: "/update/",
+				metrics: model.Metrics{
+					ID:    "Alloc",
+					MType: "Counter",
+					Delta: nil,
+					Value: &value,
+				},
 				wantStatus: 400,
 			},
 		},
@@ -41,7 +56,7 @@ func Test_sendMetric(t *testing.T) {
 				rw.WriteHeader(tt.args.wantStatus)
 			}))
 			defer server.Close()
-			response := sendMetric(server.URL + tt.args.endpoint)
+			response := sendMetric(server.URL+tt.args.endpoint, &tt.args.metrics)
 			defer response.Body.Close()
 			_, err := io.Copy(io.Discard, response.Body)
 			if err != nil {

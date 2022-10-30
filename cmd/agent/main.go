@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -11,42 +13,53 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/caarlos0/env/v6"
+
 	"github.com/NikWaltz/metrics-collector/model"
 )
 
 type Config struct {
-	host           string
-	port           int
-	pollInterval   int
-	reportInterval int
+	Address        string        `env:"ADDRESS"`
+	PollInterval   time.Duration `env:"POLL_INTERVAL"`
+	ReportInterval time.Duration `env:"REPORT_INTERVAL"`
+}
+
+var cfg Config
+
+func init() {
+	const defaultPollInterval = time.Second * 2
+	const defaultReportInterval = time.Second * 10
+	flag.StringVar(&cfg.Address, "a", "127.0.0.1:8080", "Server address for sending metrics")
+	flag.DurationVar(&cfg.PollInterval, "p", defaultPollInterval, "Poll metrics interval")
+	flag.DurationVar(&cfg.ReportInterval, "r", defaultReportInterval, "Sending report interval")
 }
 
 func main() {
-	log.Println("agent started")
-	cfg := Config{
-		host:           "localhost",
-		port:           8080,
-		pollInterval:   2,
-		reportInterval: 6,
+	flag.Parse()
+	err := env.Parse(&cfg)
+	if err != nil {
+		log.Fatal(err)
 	}
-	metricsCh := make(chan model.Metrics)
+
+	log.Println("agent started")
+	metricsCh := make(chan model.MetricsList)
 	go scrapingTask(&cfg, metricsCh)
 	go sendMetricsTask(&cfg, metricsCh)
 	select {}
 }
 
-func scrapingTask(cfg *Config, ch chan model.Metrics) {
-	var metrics model.Metrics
-	ticker := time.NewTicker(time.Duration(cfg.pollInterval) * time.Second)
+func scrapingTask(cfg *Config, ch chan model.MetricsList) {
+	var metrics model.MetricsList
+	ticker := time.NewTicker(cfg.PollInterval)
 	for range ticker.C {
 		log.Println("scraping metrics")
 		ch <- scrape(&metrics)
 	}
 }
 
-func sendMetricsTask(cfg *Config, ch chan model.Metrics) {
+func sendMetricsTask(cfg *Config, ch chan model.MetricsList) {
 	var endpoint string
-	ticker := time.NewTicker(time.Duration(cfg.reportInterval) * time.Second)
+	ticker := time.NewTicker(cfg.ReportInterval)
 	metrics := <-ch
 	for {
 		select {
@@ -55,13 +68,33 @@ func sendMetricsTask(cfg *Config, ch chan model.Metrics) {
 		case <-ticker.C:
 			v := reflect.ValueOf(metrics)
 			for i := 0; i < v.NumField(); i++ {
-				if v.Field(i).Kind() == reflect.Float64 {
-					endpoint = fmt.Sprintf("http://%s:%d/update/%s/%s/%f", cfg.host, cfg.port, v.Field(i).Type().Name(), v.Type().Field(i).Name, v.Field(i).Float())
-				} else {
-					endpoint = fmt.Sprintf("http://%s:%d/update/%s/%s/%d", cfg.host, cfg.port, v.Field(i).Type().Name(), v.Type().Field(i).Name, v.Field(i).Int())
+				var metric model.Metrics
+				switch v.Field(i).Kind() {
+				case reflect.Float64:
+					value := v.Field(i).Float()
+					metric = model.Metrics{
+						ID:    v.Type().Field(i).Name,
+						MType: v.Field(i).Type().Name(),
+						Delta: nil,
+						Value: &value,
+					}
+				case reflect.Int64:
+					value := v.Field(i).Int()
+					metric = model.Metrics{
+						ID:    v.Type().Field(i).Name,
+						MType: v.Field(i).Type().Name(),
+						Delta: &value,
+						Value: nil,
+					}
+				default:
+					log.Println("undefined metric type")
+					continue
 				}
-				log.Printf("sending to %s\n", endpoint)
-				response := sendMetric(endpoint)
+				endpoint = fmt.Sprintf("http://%s/update/", cfg.Address)
+				response := sendMetric(endpoint, &metric)
+				if response == nil {
+					continue
+				}
 				_, err := io.Copy(io.Discard, response.Body)
 				if err != nil {
 					log.Println(err)
@@ -72,15 +105,22 @@ func sendMetricsTask(cfg *Config, ch chan model.Metrics) {
 	}
 }
 
-func sendMetric(endpoint string) *http.Response {
-	response, err := http.Post(endpoint, "text/plain", bytes.NewBufferString(""))
+func sendMetric(endpoint string, metrics *model.Metrics) *http.Response {
+	body := new(bytes.Buffer)
+	err := json.NewEncoder(body).Encode(metrics)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	log.Println(body)
+	response, err := http.Post(endpoint, "application/json", body)
 	if err != nil {
 		log.Println(err)
 	}
 	return response
 }
 
-func scrape(metrics *model.Metrics) model.Metrics {
+func scrape(metrics *model.MetricsList) model.MetricsList {
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 	metrics.Alloc = model.Gauge(stats.Alloc)

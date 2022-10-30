@@ -1,6 +1,8 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -86,7 +88,7 @@ func Test_getValueHandle(t *testing.T) {
 					st:  stor,
 				},
 			},
-			metricType:     "counter",
+			metricType:     model.CounterType,
 			metricName:     "PollCounter",
 			wantStatusCode: 200,
 			wantBody:       "5",
@@ -100,7 +102,7 @@ func Test_getValueHandle(t *testing.T) {
 					st:  stor,
 				},
 			},
-			metricType:     "gauge",
+			metricType:     model.GaugeType,
 			metricName:     "Alloc",
 			wantStatusCode: 200,
 			wantBody:       "43.53234",
@@ -128,7 +130,7 @@ func Test_getValueHandle(t *testing.T) {
 					st:  stor,
 				},
 			},
-			metricType:     "gauge",
+			metricType:     model.GaugeType,
 			metricName:     "Hello",
 			wantStatusCode: 404,
 			wantBody:       "",
@@ -146,6 +148,200 @@ func Test_getValueHandle(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			a.r.ServeHTTP(rr, req)
+
+			assert.Equal(t, tt.wantStatusCode, rr.Code)
+			assert.Equal(t, tt.wantBody, rr.Body.String())
+		})
+	}
+}
+
+func Test_jsonUpdateHandle(t *testing.T) {
+	floatValue := 43.53234
+	intValue := int64(55)
+	type fields struct {
+		r       chi.Router
+		service Collector
+	}
+	tests := []struct {
+		name           string
+		metrics        model.Metrics
+		fields         fields
+		wantStatusCode int
+	}{
+		{
+			name: "Update gauge",
+			metrics: model.Metrics{
+				ID:    "Alloc",
+				MType: "Gauge",
+				Value: &floatValue,
+			},
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: nil,
+				},
+			},
+			wantStatusCode: 200,
+		},
+		{
+			name: "Update counter",
+			metrics: model.Metrics{
+				ID:    "PollCounter",
+				MType: "Counter",
+				Delta: &intValue,
+			},
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: nil,
+				},
+			},
+			wantStatusCode: 200,
+		},
+		{
+			name: "Update wrong type",
+			metrics: model.Metrics{
+				ID:    "Metric",
+				MType: "Histogram",
+				Value: &floatValue,
+			},
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: nil,
+				},
+			},
+			wantStatusCode: 501,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &api{
+				r:       tt.fields.r,
+				service: tt.fields.service,
+			}
+			a.r.Post("/update/", a.jsonUpdateHandle)
+			body := new(bytes.Buffer)
+			err := json.NewEncoder(body).Encode(tt.metrics)
+			if err != nil {
+				return
+			}
+			req, err := http.NewRequest(http.MethodPost, "/update/", body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			a.r.ServeHTTP(rr, req)
+
+			assert.Equal(t, tt.wantStatusCode, rr.Code)
+			//assert.HTTPStatusCode(t, a.jsonUpdateHandle, http.MethodPost, "/update/", body, tt.wantStatusCode)
+		})
+	}
+}
+
+func Test_getJsonValueHandle(t *testing.T) {
+	stor := model.Storage{
+		Gauges:   map[string]model.Gauge{"Alloc": 43.53234, "Mem": 72},
+		Counters: map[string]model.Counter{"PollCounter": 5},
+	}
+	type fields struct {
+		r       chi.Router
+		service Collector
+	}
+	tests := []struct {
+		name           string
+		fields         fields
+		metrics        model.Metrics
+		wantStatusCode int
+		wantBody       string
+	}{
+		{
+			name: "Get counter value",
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: nil,
+					st:  stor,
+				},
+			},
+			metrics: model.Metrics{
+				ID:    "PollCounter",
+				MType: "Counter",
+			},
+			wantStatusCode: 200,
+			wantBody:       "{\"id\":\"PollCounter\",\"type\":\"Counter\",\"delta\":5}\n",
+		},
+		{
+			name: "Get gauge value",
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: nil,
+					st:  stor,
+				},
+			},
+			metrics: model.Metrics{
+				ID:    "Alloc",
+				MType: "Gauge",
+			},
+			wantStatusCode: 200,
+			wantBody:       "{\"id\":\"Alloc\",\"type\":\"Gauge\",\"value\":43.53234}\n",
+		},
+		{
+			name: "Get wrong type",
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: nil,
+					st:  stor,
+				},
+			},
+			metrics: model.Metrics{
+				ID:    "Alloc",
+				MType: "Histogram",
+			},
+			wantStatusCode: 404,
+			wantBody:       "",
+		},
+		{
+			name: "Get wrong metric",
+			fields: fields{
+				r: chi.NewRouter(),
+				service: mockCollector{
+					err: errors.New("some error"),
+					st:  stor,
+				},
+			},
+			metrics: model.Metrics{
+				ID:    "Hello",
+				MType: "Gauge",
+			},
+			wantStatusCode: 404,
+			wantBody:       "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &api{
+				r:       tt.fields.r,
+				service: tt.fields.service,
+			}
+			a.r.Post("/value/", a.getJSONValueHandle)
+
+			body := new(bytes.Buffer)
+			err := json.NewEncoder(body).Encode(tt.metrics)
+			if err != nil {
+				return
+			}
+			req, err := http.NewRequest(http.MethodPost, "/value/", body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 			a.r.ServeHTTP(rr, req)
 
