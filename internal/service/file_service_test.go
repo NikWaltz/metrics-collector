@@ -3,11 +3,13 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/NikWaltz/metrics-collector/model"
-	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/NikWaltz/metrics-collector/model"
 )
 
 func Test_fileService_saveToFile(t *testing.T) {

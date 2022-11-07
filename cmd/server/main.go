@@ -17,6 +17,8 @@ type Config struct {
 	StoreInterval time.Duration `env:"STORE_INTERVAL"`
 	StoreFile     string        `env:"STORE_FILE"`
 	Restore       bool          `env:"RESTORE"`
+	DatabaseDsn   string        `env:"DATABASE_DSN"`
+	Key           string        `env:"KEY"`
 }
 
 var cfg Config
@@ -27,6 +29,8 @@ func init() {
 	flag.DurationVar(&cfg.StoreInterval, "i", defaultDuration, "Store to file interval")
 	flag.StringVar(&cfg.StoreFile, "f", "/tmp/devops-metrics-db.json", "Store file path")
 	flag.BoolVar(&cfg.Restore, "r", true, "Restore storage from file")
+	flag.StringVar(&cfg.DatabaseDsn, "d", "", "Data source name")
+	flag.StringVar(&cfg.Key, "k", "", "Key for hash")
 	flag.Parse()
 	err := env.Parse(&cfg)
 	if err != nil {
@@ -38,11 +42,17 @@ func main() {
 	log.Println("server started")
 
 	myRepo := model.NewStorage()
-	myFileService := service.NewFileService(myRepo, cfg.StoreFile, cfg.StoreInterval, cfg.Restore)
-	myService := service.NewService(myRepo)
-	myAPI := api.New(myService)
+	var myService api.Collector
 
-	go myFileService.Run()
+	if cfg.DatabaseDsn != "" {
+		myService = service.NewDBService(myRepo, cfg.DatabaseDsn)
+	} else {
+		myService = service.NewService(myRepo)
+		myFileService := service.NewFileService(myRepo, cfg.StoreFile, cfg.StoreInterval, cfg.Restore)
+		go myFileService.Run()
+	}
+
+	myAPI := api.New(myService, cfg.Key)
 	err := myAPI.Run(cfg.Address)
 	if err != nil {
 		log.Fatalln(err)

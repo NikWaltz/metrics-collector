@@ -2,6 +2,10 @@ package api
 
 import (
 	"compress/gzip"
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,10 +24,11 @@ import (
 )
 
 type Collector interface {
-	Update(string, string, string) error
-	GetGauge(string) (model.Gauge, error)
-	GetCounter(string) (model.Counter, error)
-	GetStorage() model.Storage
+	Update(context.Context, string, string, string) error
+	GetGauge(context.Context, string) (model.Gauge, error)
+	GetCounter(context.Context, string) (model.Counter, error)
+	GetStorage(context.Context) model.Storage
+	Ping(ctx context.Context) error
 }
 
 type gzipWriter struct {
@@ -38,19 +43,19 @@ func (w gzipWriter) Write(b []byte) (int, error) {
 type api struct {
 	r       chi.Router
 	service Collector
+	key     string
 }
 
-func New(service Collector) *api {
+func New(service Collector, key string) *api {
 	r := chi.NewRouter()
-
-	return &api{service: service, r: r}
+	return &api{service: service, r: r, key: key}
 }
 
 func (a *api) updateHandle(w http.ResponseWriter, r *http.Request) {
 	metricType := chi.URLParam(r, "type")
 	metricName := chi.URLParam(r, "name")
 	metricValue := chi.URLParam(r, "value")
-	err := a.service.Update(metricType, metricName, metricValue)
+	err := a.service.Update(r.Context(), metricType, metricName, metricValue)
 	if err != nil {
 		var typeError *service.TypeError
 		if errors.As(err, &typeError) {
@@ -72,7 +77,7 @@ func (a *api) getValueHandle(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "name")
 	switch strings.ToLower(metricType) {
 	case model.GaugeType:
-		if value, err := a.service.GetGauge(metricName); err == nil {
+		if value, err := a.service.GetGauge(r.Context(), metricName); err == nil {
 			w.WriteHeader(http.StatusOK)
 			_, errWr := w.Write([]byte(fmt.Sprintf("%v", value)))
 			if errWr != nil {
@@ -82,7 +87,7 @@ func (a *api) getValueHandle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	case model.CounterType:
-		if value, err := a.service.GetCounter(metricName); err == nil {
+		if value, err := a.service.GetCounter(r.Context(), metricName); err == nil {
 			w.WriteHeader(http.StatusOK)
 			_, errWr := w.Write([]byte(fmt.Sprintf("%d", value)))
 			if errWr != nil {
@@ -112,6 +117,14 @@ func (a *api) jsonUpdateHandle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if a.key != "" {
+		hashErr := verifyHash(&metric, a.key)
+		if hashErr != nil {
+			http.Error(w, hashErr.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+
 	var value string
 	switch strings.ToLower(metric.MType) {
 	case model.GaugeType:
@@ -122,7 +135,7 @@ func (a *api) jsonUpdateHandle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
 		return
 	}
-	err := a.service.Update(metric.MType, metric.ID, value)
+	err := a.service.Update(r.Context(), metric.MType, metric.ID, value)
 
 	if err != nil {
 		var typeError *service.TypeError
@@ -158,10 +171,13 @@ func (a *api) getJSONValueHandle(w http.ResponseWriter, r *http.Request) {
 
 	switch strings.ToLower(metric.MType) {
 	case model.GaugeType:
-		if value, err := a.service.GetGauge(metric.ID); err == nil {
+		if value, err := a.service.GetGauge(r.Context(), metric.ID); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			metric.Value = (*float64)(&value)
+			if a.key != "" {
+				hash(&metric, a.key)
+			}
 			errEncode := json.NewEncoder(w).Encode(metric)
 			if errEncode != nil {
 				log.Println(errEncode)
@@ -170,10 +186,13 @@ func (a *api) getJSONValueHandle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	case model.CounterType:
-		if value, err := a.service.GetCounter(metric.ID); err == nil {
+		if value, err := a.service.GetCounter(r.Context(), metric.ID); err == nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			metric.Delta = (*int64)(&value)
+			if a.key != "" {
+				hash(&metric, a.key)
+			}
 			errEncode := json.NewEncoder(w).Encode(metric)
 			if errEncode != nil {
 				log.Println(errEncode)
@@ -186,8 +205,61 @@ func (a *api) getJSONValueHandle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (a *api) updatesHandle(w http.ResponseWriter, r *http.Request) {
+	var metrics []model.Metrics
+
+	contentType, _ := header.ParseValueAndParams(r.Header, "Content-Type")
+	if contentType != "application/json" {
+		msg := "Content-Type header is not application/json"
+		http.Error(w, msg, http.StatusUnsupportedMediaType)
+		return
+	}
+
+	decodeErr := json.NewDecoder(r.Body).Decode(&metrics)
+	if decodeErr != nil {
+		http.Error(w, decodeErr.Error(), http.StatusBadRequest)
+		return
+	}
+
+	for _, metric := range metrics {
+		if a.key != "" {
+			hashErr := verifyHash(&metric, a.key)
+			if hashErr != nil {
+				http.Error(w, hashErr.Error(), http.StatusBadRequest)
+				return
+			}
+		}
+		var value string
+		switch strings.ToLower(metric.MType) {
+		case model.GaugeType:
+			value = strconv.FormatFloat(*metric.Value, 'f', -1, 64)
+		case model.CounterType:
+			value = strconv.FormatInt(*metric.Delta, 10)
+		default:
+			w.WriteHeader(http.StatusNotImplemented)
+			return
+		}
+		err := a.service.Update(r.Context(), metric.MType, metric.ID, value)
+
+		if err != nil {
+			var typeError *service.TypeError
+			if errors.As(err, &typeError) {
+				w.WriteHeader(http.StatusNotImplemented)
+			} else {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			_, err := w.Write([]byte(err.Error()))
+			if err != nil {
+				log.Println(err)
+			}
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}
+}
+
 func (a *api) getMetricsHandle(w http.ResponseWriter, r *http.Request) {
-	data := a.service.GetStorage()
+	data := a.service.GetStorage(r.Context())
 	data.Counters["PollCount"] = 24
 	htmlTemplate := `{{range $index, $element := .Gauges}}{{$index}} {{printf "%f" $element}}
 {{end}}{{range $index, $element := .Counters}}{{$index}} {{printf "%d" $element}}
@@ -200,6 +272,16 @@ func (a *api) getMetricsHandle(w http.ResponseWriter, r *http.Request) {
 	errExec := tmpl.Execute(w, &data)
 	if errExec != nil {
 		log.Println(err)
+	}
+}
+
+func (a *api) pingStoreHandle(w http.ResponseWriter, r *http.Request) {
+	err := a.service.Ping(r.Context())
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -248,13 +330,54 @@ func gzipDecompressHandle(next http.Handler) http.Handler {
 	})
 }
 
+func verifyHash(metric *model.Metrics, key string) error {
+	var data []byte
+	switch strings.ToLower(metric.MType) {
+	case model.GaugeType:
+		data = []byte(fmt.Sprintf("%s:gauge:%f", metric.ID, *metric.Value))
+	case model.CounterType:
+		data = []byte(fmt.Sprintf("%s:counter:%d", metric.ID, *metric.Delta))
+	default:
+		return errors.New("bad request")
+	}
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write(data)
+	sign := h.Sum(nil)
+	hash, err := hex.DecodeString(metric.Hash)
+	if err != nil {
+		return errors.New("bad request")
+	}
+	if hmac.Equal(sign, hash) {
+		return nil
+	} else {
+		return errors.New("bad request")
+	}
+}
+
+func hash(metric *model.Metrics, key string) {
+	var data []byte
+	switch strings.ToLower(metric.MType) {
+	case model.GaugeType:
+		data = []byte(fmt.Sprintf("%s:gauge:%f", metric.ID, *metric.Value))
+	case model.CounterType:
+		data = []byte(fmt.Sprintf("%s:counter:%d", metric.ID, *metric.Delta))
+	default:
+		return
+	}
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write(data)
+	metric.Hash = hex.EncodeToString(h.Sum(nil))
+}
+
 func (a *api) Run(addr string) error {
 	a.r.Use(gzipCompressHandle)
 	a.r.Use(gzipDecompressHandle)
 	a.r.Post("/update/{type}/{name}/{value}", a.updateHandle)
 	a.r.Get("/value/{type}/{name}", a.getValueHandle)
 	a.r.Post("/update/", a.jsonUpdateHandle)
+	a.r.Post("/updates/", a.updatesHandle)
 	a.r.Post("/value/", a.getJSONValueHandle)
 	a.r.Get("/", a.getMetricsHandle)
+	a.r.Get("/ping", a.pingStoreHandle)
 	return http.ListenAndServe(addr, a.r)
 }
