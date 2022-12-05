@@ -39,6 +39,10 @@ func (c mockCollector) Ping(ctx context.Context) error {
 	return nil
 }
 
+func (c mockCollector) Close() {
+	return
+}
+
 func Test_updateHandle(t *testing.T) {
 	type fields struct {
 		service Collector
