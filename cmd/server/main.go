@@ -51,6 +51,7 @@ func main() {
 		myFileService := service.NewFileService(myRepo, cfg.StoreFile, cfg.StoreInterval, cfg.Restore)
 		go myFileService.Run()
 	}
+	defer myService.Close()
 
 	myAPI := api.New(myService, cfg.Key)
 	err := myAPI.Run(cfg.Address)

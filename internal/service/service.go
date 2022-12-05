@@ -71,3 +71,7 @@ func (s *service) Update(ctx context.Context, metricType string, metricName stri
 func (s *service) Ping(ctx context.Context) error {
 	return nil
 }
+
+func (s *service) Close() {
+	return
+}

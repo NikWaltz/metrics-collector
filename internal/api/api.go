@@ -29,6 +29,7 @@ type Collector interface {
 	GetCounter(context.Context, string) (model.Counter, error)
 	GetStorage(context.Context) model.Storage
 	Ping(ctx context.Context) error
+	Close()
 }
 
 type gzipWriter struct {
