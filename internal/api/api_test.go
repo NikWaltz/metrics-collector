@@ -40,7 +40,6 @@ func (c mockCollector) Ping(ctx context.Context) error {
 }
 
 func (c mockCollector) Close() {
-	return
 }
 
 func Test_updateHandle(t *testing.T) {

@@ -73,5 +73,4 @@ func (s *service) Ping(ctx context.Context) error {
 }
 
 func (s *service) Close() {
-	return
 }
