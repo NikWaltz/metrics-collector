@@ -242,9 +242,7 @@ func (a *api) updatesHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		err := a.service.Update(r.Context(), metric.MType, metric.ID, value)
 
-		if err == nil {
-			return
-		} else {
+		if err != nil {
 			var typeError *service.TypeError
 			if errors.As(err, &typeError) {
 				w.WriteHeader(http.StatusNotImplemented)
