@@ -242,19 +242,20 @@ func (a *api) updatesHandle(w http.ResponseWriter, r *http.Request) {
 		}
 		err := a.service.Update(r.Context(), metric.MType, metric.ID, value)
 
-		if err != nil {
+		if err == nil {
+			w.WriteHeader(http.StatusOK)
+			return
+		} else {
 			var typeError *service.TypeError
 			if errors.As(err, &typeError) {
 				w.WriteHeader(http.StatusNotImplemented)
 			} else {
 				w.WriteHeader(http.StatusBadRequest)
 			}
-			_, err := w.Write([]byte(err.Error()))
-			if err != nil {
-				log.Println(err)
+			_, errWr := w.Write([]byte(err.Error()))
+			if errWr != nil {
+				log.Println(errWr)
 			}
-		} else {
-			w.WriteHeader(http.StatusOK)
 		}
 	}
 }
