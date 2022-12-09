@@ -244,7 +244,6 @@ func (a *api) updatesHandle(w http.ResponseWriter, r *http.Request) {
 
 		if err == nil {
 			w.WriteHeader(http.StatusOK)
-			return
 		} else {
 			var typeError *service.TypeError
 			if errors.As(err, &typeError) {
