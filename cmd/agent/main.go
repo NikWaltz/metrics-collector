@@ -103,15 +103,7 @@ func sendMetricsTask(cfg *Config, ch chan model.MetricsList) {
 				}
 				metricsArray = append(metricsArray, &metric)
 			}
-			response := sendMetrics(endpoint, metricsArray)
-			if response == nil {
-				continue
-			}
-			_, err := io.Copy(io.Discard, response.Body)
-			if err != nil {
-				log.Println(err)
-			}
-			response.Body.Close()
+			sendMetrics(endpoint, metricsArray)
 		}
 	}
 }
@@ -131,19 +123,27 @@ func sendMetric(endpoint string, metrics *model.Metrics) *http.Response {
 	return response
 }
 
-func sendMetrics(endpoint string, metrics []*model.Metrics) *http.Response {
+func sendMetrics(endpoint string, metrics []*model.Metrics) {
 	body := new(bytes.Buffer)
 	err := json.NewEncoder(body).Encode(metrics)
 	if err != nil {
 		log.Println(err)
-		return nil
+		return
 	}
 	log.Println(body)
 	response, err := http.Post(endpoint, "application/json", body)
 	if err != nil {
 		log.Println(err)
 	}
-	return response
+	if response == nil {
+		log.Println("Response is nil")
+		return
+	}
+	defer response.Body.Close()
+	_, errDiscard := io.Copy(io.Discard, response.Body)
+	if errDiscard != nil {
+		log.Println(err)
+	}
 }
 
 func scrape(metrics *model.MetricsList) model.MetricsList {
