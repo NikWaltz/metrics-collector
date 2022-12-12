@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -11,6 +14,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/caarlos0/env/v6"
@@ -22,6 +26,7 @@ type Config struct {
 	Address        string        `env:"ADDRESS"`
 	PollInterval   time.Duration `env:"POLL_INTERVAL"`
 	ReportInterval time.Duration `env:"REPORT_INTERVAL"`
+	Key            string        `env:"KEY"`
 }
 
 var cfg Config
@@ -32,6 +37,7 @@ func init() {
 	flag.StringVar(&cfg.Address, "a", "127.0.0.1:8080", "Server address for sending metrics")
 	flag.DurationVar(&cfg.PollInterval, "p", defaultPollInterval, "Poll metrics interval")
 	flag.DurationVar(&cfg.ReportInterval, "r", defaultReportInterval, "Sending report interval")
+	flag.StringVar(&cfg.Key, "k", "", "Key for hash")
 }
 
 func main() {
@@ -66,6 +72,7 @@ func sendMetricsTask(cfg *Config, ch chan model.MetricsList) {
 		case metrics = <-ch:
 			log.Println("metrics updated")
 		case <-ticker.C:
+			var metricsArray []*model.Metrics
 			v := reflect.ValueOf(metrics)
 			for i := 0; i < v.NumField(); i++ {
 				var metric model.Metrics
@@ -90,17 +97,13 @@ func sendMetricsTask(cfg *Config, ch chan model.MetricsList) {
 					log.Println("undefined metric type")
 					continue
 				}
-				endpoint = fmt.Sprintf("http://%s/update/", cfg.Address)
-				response := sendMetric(endpoint, &metric)
-				if response == nil {
-					continue
+				endpoint = fmt.Sprintf("http://%s/updates/", cfg.Address)
+				if cfg.Key != "" {
+					hash(&metric, cfg.Key)
 				}
-				_, err := io.Copy(io.Discard, response.Body)
-				if err != nil {
-					log.Println(err)
-				}
-				response.Body.Close()
+				metricsArray = append(metricsArray, &metric)
 			}
+			sendMetrics(endpoint, metricsArray)
 		}
 	}
 }
@@ -118,6 +121,29 @@ func sendMetric(endpoint string, metrics *model.Metrics) *http.Response {
 		log.Println(err)
 	}
 	return response
+}
+
+func sendMetrics(endpoint string, metrics []*model.Metrics) {
+	body := new(bytes.Buffer)
+	err := json.NewEncoder(body).Encode(metrics)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println(body)
+	response, err := http.Post(endpoint, "application/json", body)
+	if err != nil {
+		log.Println(err)
+	}
+	if response == nil {
+		log.Println("Response is nil")
+		return
+	}
+	defer response.Body.Close()
+	_, errDiscard := io.Copy(io.Discard, response.Body)
+	if errDiscard != nil {
+		log.Println(err)
+	}
 }
 
 func scrape(metrics *model.MetricsList) model.MetricsList {
@@ -153,4 +179,19 @@ func scrape(metrics *model.MetricsList) model.MetricsList {
 	metrics.PollCount++
 	metrics.RandomValue = model.Gauge(rand.Float64())
 	return *metrics
+}
+
+func hash(metric *model.Metrics, key string) {
+	var data []byte
+	switch strings.ToLower(metric.MType) {
+	case model.GaugeType:
+		data = []byte(fmt.Sprintf("%s:gauge:%f", metric.ID, *metric.Value))
+	case model.CounterType:
+		data = []byte(fmt.Sprintf("%s:counter:%d", metric.ID, *metric.Delta))
+	default:
+		return
+	}
+	h := hmac.New(sha256.New, []byte(key))
+	h.Write(data)
+	metric.Hash = hex.EncodeToString(h.Sum(nil))
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,18 +21,25 @@ type mockCollector struct {
 	st  model.Storage
 }
 
-func (c mockCollector) Update(name string, typ string, value string) error {
+func (c mockCollector) Update(ctx context.Context, name string, typ string, value string) error {
 	return c.err
 }
 
-func (c mockCollector) GetGauge(name string) (model.Gauge, error) {
+func (c mockCollector) GetGauge(ctx context.Context, name string) (model.Gauge, error) {
 	return c.st.Gauges[name], c.err
 }
-func (c mockCollector) GetCounter(name string) (model.Counter, error) {
+func (c mockCollector) GetCounter(ctx context.Context, name string) (model.Counter, error) {
 	return c.st.Counters[name], c.err
 }
-func (c mockCollector) GetStorage() model.Storage {
+func (c mockCollector) GetStorage(ctx context.Context) model.Storage {
 	return c.st
+}
+
+func (c mockCollector) Ping(ctx context.Context) error {
+	return nil
+}
+
+func (c mockCollector) Close() {
 }
 
 func Test_updateHandle(t *testing.T) {
@@ -56,7 +64,7 @@ func Test_updateHandle(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := New(tt.fields.service)
+			a := New(tt.fields.service, "")
 			assert.HTTPStatusCode(t, a.updateHandle, http.MethodPost, "/update/type/name/value", nil, tt.wantStatusCode)
 		})
 	}
