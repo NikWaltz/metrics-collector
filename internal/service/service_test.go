@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -81,9 +82,9 @@ func TestUpdate(t *testing.T) {
 				storage: tt.fields.storage,
 			}
 			if tt.wantErr {
-				assert.Error(t, s.Update(tt.args.metricType, tt.args.metricName, tt.args.metricValue))
+				assert.Error(t, s.Update(context.TODO(), tt.args.metricType, tt.args.metricName, tt.args.metricValue))
 			} else {
-				assert.NoError(t, s.Update(tt.args.metricType, tt.args.metricName, tt.args.metricValue))
+				assert.NoError(t, s.Update(context.TODO(), tt.args.metricType, tt.args.metricName, tt.args.metricValue))
 			}
 		})
 	}
@@ -129,7 +130,7 @@ func TestGetCounter(t *testing.T) {
 			s := &service{
 				storage: tt.fields.storage,
 			}
-			got, err := s.GetCounter(tt.args.name)
+			got, err := s.GetCounter(context.TODO(), tt.args.name)
 			if tt.wantErr == nil {
 				assert.NoError(t, tt.wantErr, err)
 			} else {
@@ -180,7 +181,7 @@ func TestGetGauge(t *testing.T) {
 			s := &service{
 				storage: tt.fields.storage,
 			}
-			got, err := s.GetGauge(tt.args.name)
+			got, err := s.GetGauge(context.TODO(), tt.args.name)
 			if tt.wantErr == nil {
 				assert.NoError(t, tt.wantErr, err)
 			} else {

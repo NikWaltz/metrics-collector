@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -23,7 +24,7 @@ func (e *TypeError) Error() string {
 	return "wrong metric type"
 }
 
-func (s *service) GetGauge(name string) (model.Gauge, error) {
+func (s *service) GetGauge(ctx context.Context, name string) (model.Gauge, error) {
 	if value, ok := s.storage.GetGauge(name); ok {
 		return value, nil
 	} else {
@@ -32,7 +33,7 @@ func (s *service) GetGauge(name string) (model.Gauge, error) {
 
 }
 
-func (s *service) GetCounter(name string) (model.Counter, error) {
+func (s *service) GetCounter(ctx context.Context, name string) (model.Counter, error) {
 	if value, ok := s.storage.GetCounter(name); ok {
 		return value, nil
 	} else {
@@ -40,11 +41,11 @@ func (s *service) GetCounter(name string) (model.Counter, error) {
 	}
 }
 
-func (s *service) GetStorage() model.Storage {
+func (s *service) GetStorage(ctx context.Context) model.Storage {
 	return s.storage
 }
 
-func (s *service) Update(metricType string, metricName string, metricValue string) error {
+func (s *service) Update(ctx context.Context, metricType string, metricName string, metricValue string) error {
 	switch strings.ToLower(metricType) {
 	case model.GaugeType:
 		value, err := strconv.ParseFloat(metricValue, 64)
@@ -65,4 +66,11 @@ func (s *service) Update(metricType string, metricName string, metricValue strin
 	default:
 		return &TypeError{}
 	}
+}
+
+func (s *service) Ping(ctx context.Context) error {
+	return nil
+}
+
+func (s *service) Close() {
 }
