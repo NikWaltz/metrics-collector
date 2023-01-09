@@ -38,6 +38,12 @@ type MetricsList struct {
 	PollCount     Counter
 }
 
+type ExtraMetricsList struct {
+	TotalMemory     Gauge
+	FreeMemory      Gauge
+	CPUutilization1 Gauge
+}
+
 type Metrics struct {
 	ID    string   `json:"id"`
 	MType string   `json:"type"`

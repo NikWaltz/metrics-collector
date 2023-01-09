@@ -17,9 +17,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/caarlos0/env/v6"
-
 	"github.com/NikWaltz/metrics-collector/model"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
+
+	"github.com/caarlos0/env/v6"
 )
 
 type Config struct {
@@ -49,8 +51,10 @@ func main() {
 
 	log.Println("agent started")
 	metricsCh := make(chan model.MetricsList)
+	extraMetricsCh := make(chan model.ExtraMetricsList)
 	go scrapingTask(&cfg, metricsCh)
-	go sendMetricsTask(&cfg, metricsCh)
+	go extraScrapingTask(&cfg, extraMetricsCh)
+	go sendMetricsTask(&cfg, metricsCh, extraMetricsCh)
 	select {}
 }
 
@@ -62,50 +66,69 @@ func scrapingTask(cfg *Config, ch chan model.MetricsList) {
 		ch <- scrape(&metrics)
 	}
 }
+func extraScrapingTask(cfg *Config, ch chan model.ExtraMetricsList) {
+	var metrics model.ExtraMetricsList
+	ticker := time.NewTicker(cfg.PollInterval)
+	for range ticker.C {
+		log.Println("scraping metrics")
+		ch <- extraScrape(&metrics)
+	}
+}
 
-func sendMetricsTask(cfg *Config, ch chan model.MetricsList) {
+func sendMetricsTask(cfg *Config, ch chan model.MetricsList, ech chan model.ExtraMetricsList) {
 	var endpoint string
 	ticker := time.NewTicker(cfg.ReportInterval)
 	metrics := <-ch
+	extraMetrics := <-ech
 	for {
 		select {
 		case metrics = <-ch:
 			log.Println("metrics updated")
+		case extraMetrics = <-ech:
+			log.Println("metrics updated")
 		case <-ticker.C:
 			var metricsArray []*model.Metrics
-			v := reflect.ValueOf(metrics)
-			for i := 0; i < v.NumField(); i++ {
-				var metric model.Metrics
-				switch v.Field(i).Kind() {
-				case reflect.Float64:
-					value := v.Field(i).Float()
-					metric = model.Metrics{
-						ID:    v.Type().Field(i).Name,
-						MType: v.Field(i).Type().Name(),
-						Delta: nil,
-						Value: &value,
-					}
-				case reflect.Int64:
-					value := v.Field(i).Int()
-					metric = model.Metrics{
-						ID:    v.Type().Field(i).Name,
-						MType: v.Field(i).Type().Name(),
-						Delta: &value,
-						Value: nil,
-					}
-				default:
-					log.Println("undefined metric type")
-					continue
-				}
-				endpoint = fmt.Sprintf("http://%s/updates/", cfg.Address)
-				if cfg.Key != "" {
-					hash(&metric, cfg.Key)
-				}
-				metricsArray = append(metricsArray, &metric)
-			}
+			reflectMetrics := reflect.ValueOf(metrics)
+			metricsArray = prepareMetricsArray(metricsArray, reflectMetrics, cfg.Key)
+			reflectExtraMetrics := reflect.ValueOf(extraMetrics)
+			metricsArray = prepareMetricsArray(metricsArray, reflectExtraMetrics, cfg.Key)
+			endpoint = fmt.Sprintf("http://%s/updates/", cfg.Address)
 			sendMetrics(endpoint, metricsArray)
 		}
 	}
+}
+
+func prepareMetricsArray(metricsArray []*model.Metrics, v reflect.Value, hashKey string) []*model.Metrics {
+	for i := 0; i < v.NumField(); i++ {
+		var metric model.Metrics
+		switch v.Field(i).Kind() {
+		case reflect.Float64:
+			value := v.Field(i).Float()
+			metric = model.Metrics{
+				ID:    v.Type().Field(i).Name,
+				MType: v.Field(i).Type().Name(),
+				Delta: nil,
+				Value: &value,
+			}
+		case reflect.Int64:
+			value := v.Field(i).Int()
+			metric = model.Metrics{
+				ID:    v.Type().Field(i).Name,
+				MType: v.Field(i).Type().Name(),
+				Delta: &value,
+				Value: nil,
+			}
+		default:
+			log.Println("undefined metric type")
+			continue
+		}
+
+		if hashKey != "" {
+			hash(&metric, cfg.Key)
+		}
+		metricsArray = append(metricsArray, &metric)
+	}
+	return metricsArray
 }
 
 func sendMetric(endpoint string, metrics *model.Metrics) *http.Response {
@@ -178,6 +201,15 @@ func scrape(metrics *model.MetricsList) model.MetricsList {
 	metrics.TotalAlloc = model.Gauge(stats.TotalAlloc)
 	metrics.PollCount++
 	metrics.RandomValue = model.Gauge(rand.Float64())
+	return *metrics
+}
+
+func extraScrape(metrics *model.ExtraMetricsList) model.ExtraMetricsList {
+	v, _ := mem.VirtualMemory()
+	s, _ := cpu.Percent(0, false)
+	metrics.TotalMemory = model.Gauge(v.Total)
+	metrics.FreeMemory = model.Gauge(v.Free)
+	metrics.CPUutilization1 = model.Gauge(s[0])
 	return *metrics
 }
 
